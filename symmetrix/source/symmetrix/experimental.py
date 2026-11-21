@@ -68,12 +68,12 @@ class NequIPFoundation(BaseCalculator):
 
 
 class MACEPolar(Calculator):
-    """Experimental ASE interface to Symmetrix's periodic PolarMACE engines.
+    """Experimental ASE interface to Symmetrix's PolarMACE engines.
 
     ``dtype=None`` selects float64 on CPU and float32 on CUDA. CUDA also
     supports ``float32-mixed``; float64 CUDA and float32 CPU are unsupported.
-    Electrostatics use the model's direct reciprocal-space sums. All three
-    cell directions must be periodic, including for isolated-molecule inputs.
+    Fully open molecules use real-space electrostatics. Fully periodic systems
+    use reciprocal-space sums and support stress.
 
     ``charge`` is the total charge in electron units. ``spin`` follows the
     Symmetrix convention: spin-channel charges are (charge +/- (spin - 1))/2.
@@ -139,15 +139,17 @@ class MACEPolar(Calculator):
     def calculate(self, atoms=None, properties=["energy"], system_changes=all_changes):
         Calculator.calculate(self, atoms, properties, system_changes)
         a = self.atoms
-        if not a.pbc.all():
-            raise ValueError("MACEPolar currently requires periodic boundaries in all three directions")
+        periodic = a.pbc.all()
+        if a.pbc.any() and not periodic:
+            raise ValueError("MACEPolar requires fully open or fully periodic boundaries")
         if len(a) == 0:
             raise ValueError("MACEPolar requires at least one atom")
         if not np.isfinite(a.positions).all() or not np.isfinite(a.cell.array).all():
             raise ValueError("MACEPolar positions and cell must be finite")
-        volume = abs(np.linalg.det(a.cell.array))
-        if not np.isfinite(volume) or volume == 0:
-            raise ValueError("MACEPolar requires a nonsingular periodic cell")
+        if periodic:
+            volume = abs(np.linalg.det(a.cell.array))
+            if not np.isfinite(volume) or volume == 0:
+                raise ValueError("MACEPolar requires a nonsingular periodic cell")
         energy, forces, virial, energies = self.evaluator.compute(
             a.positions, a.numbers, a.cell.array, a.pbc,
             self.parameters.charge, self.parameters.spin, "energies" in properties,
@@ -156,9 +158,9 @@ class MACEPolar(Calculator):
             "energy": float(energy),
             "free_energy": float(energy),
             "forces": np.asarray(forces),
-            # Backend order: xx yy zz xy xz yz; ASE: xx yy zz yz xz xy.
-            # This is potential stress; ASE adds kinetic stress when requested.
-            "stress": -np.asarray(virial)[[0, 1, 2, 5, 4, 3]] / volume,
         }
+        if periodic:
+            # Backend: xx yy zz xy xz yz. ASE: xx yy zz yz xz xy.
+            self.results["stress"] = -np.asarray(virial)[[0, 1, 2, 5, 4, 3]] / volume
         if energies is not None:
             self.results["energies"] = np.asarray(energies)

@@ -86,16 +86,17 @@ atoms.calc = MACEPolar(
 )
 energy = atoms.get_potential_energy()  # eV
 forces = atoms.get_forces()           # eV / Angstrom
-stress = atoms.get_stress()           # eV / Angstrom**3, ASE Voigt order
+if atoms.pbc.all():
+    stress = atoms.get_stress()       # eV / Angstrom**3, ASE Voigt order
 ```
 
-All three directions must be periodic and the cell must be nonsingular.
-Orthorhombic and triclinic cells, including changes made by an ASE barostat,
-are supported. Cell changes rebuild the neighbor list and reciprocal-space
-geometry. Electrostatics use the existing model's direct reciprocal-space
-sums; this interface does not use the particle-mesh solver from LAMMPS.
-Nonperiodic systems, slabs, external fields and distributed execution are not
-implemented. The CUDA engine retains its existing supported model shapes.
+For an isolated molecule, set `atoms.pbc = False`. The cell is optional.
+CPU and CUDA evaluate the Gaussian electrostatic interactions between every
+distinct pair of atoms, using the displaced monopoles of PyTorch MACE-POLAR's
+`realspace` mode. This part scales quadratically with atom count.
+For fully periodic systems, supply a nonsingular orthorhombic or triclinic
+cell. The calculator uses direct reciprocal-space sums and reports potential
+stress in ASE Voigt order. Partially periodic geometries are unsupported.
 
 `dtype=None` selects `float64` on CPU or `float32` on CUDA. CPU supports only
 `float64`; CUDA supports `float32` and `float32-mixed`, matching the existing
@@ -111,7 +112,8 @@ with `atoms.calc.set(charge=..., spin=...)`; this clears ASE's cached results.
 Construct a new calculator to change model, device, dtype or skin.
 
 The calculator provides total energy, free energy (equal to energy), per-atom
-energies, forces and potential stress. ASE adds kinetic stress when requested.
+energies and forces. Fully periodic systems also support potential stress.
+ASE adds kinetic stress when requested.
 It can be composed with other ASE calculators through `SumCalculator`.
 
 Build with GCC as `CMAKE_CXX_COMPILER`, letting Kokkos route its CUDA code

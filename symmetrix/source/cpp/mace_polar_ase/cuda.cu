@@ -1,5 +1,6 @@
 #include "evaluator.hpp"
 #include "mace_polar_cuda.hpp"
+#include "realspace.hpp"
 
 #include <numeric>
 #include <span>
@@ -35,6 +36,14 @@ __global__ void scatter(int edges, const int* centers, const int* neighbors,
     atomicAdd(forces + 3*neighbors[e] + k, f);
 }
 
+template <realspace::Operation op>
+__global__ void realspace_kernel(int n, const double* positions, const realspace::Projection* params,
+                                 int widths, const float* q, const float* adj, float* out, double* f) {
+    const long thread = long(blockIdx.x)*blockDim.x + threadIdx.x;
+    const int i = int(thread/32);
+    if (i < n) realspace::evaluate<op>(i, threadIdx.x%32, 32, n, positions, params, widths, q, adj, out, f);
+}
+
 struct CUDA : Evaluator {
     CUDA(const std::string& file, double skin, bool mixed)
         : model(file, mixed), geometry(model.r_cut, model.radial_spline_r_min, model.atomic_numbers, skin) {}
@@ -52,6 +61,14 @@ struct CUDA : Evaluator {
         upload(xyz, geometry.xyz.data(), 3*edges, stream);
         upload(r, geometry.r.data(), edges, stream);
         upload(positions, x, 3L*n, stream);
+        if (!pbc[0] && !device_params.p)
+            upload(device_params, params.data(), params.size(), stream);
+        realspace::set_hooks(model, !pbc[0], [this, n, stream]<realspace::Operation op>(
+                const float* q, const float* adj, float* out, double* f) {
+            realspace_kernel<op><<<(n+3L)/4, 128, 0, stream>>>(n, positions.p, device_params.p,
+                int(params.size())-1, q, adj, out, f);
+            check(cudaGetLastError());
+        });
         // The evaluator expects positions/edges on device, but cell metadata on host.
         model.compute_node_energies_forces(n,
             std::span<const int>(node_types.p, n), std::span<const int>(num_neigh.p, n),
@@ -79,6 +96,8 @@ struct CUDA : Evaluator {
     Stream execution;
     MACEPolarCuda model;
     Geometry geometry;
+    std::vector<realspace::Projection> params = realspace::projections(model);
+    MACEPolarCuda::Buffer<realspace::Projection> device_params;
     MACEPolarCuda::Buffer<int> node_types, num_neigh, neigh_indices, neigh_types, centers;
     MACEPolarCuda::Buffer<double> xyz, r, positions, f;
     std::vector<double> node_energies;

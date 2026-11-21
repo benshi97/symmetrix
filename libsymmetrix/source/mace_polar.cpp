@@ -1361,7 +1361,6 @@ void MACEPolar::features_reverse(int n, const double* q, const std::vector<cplx>
 {
     const int num_k = kvec.size();
     const int num_sigmas = feature_sigmas.size();
-    const double prefactor = 2.0*field_constant/volume;
     auto v = std::vector<double>(long(n)*8*num_sigmas);
     for (int i=0; i<n; ++i)
         for (int lm=0; lm<4; ++lm)
@@ -1388,6 +1387,7 @@ void MACEPolar::features_reverse(int n, const double* q, const std::vector<cplx>
         return;
     }
     auto Rv = std::vector<cplx>(8*num_sigmas*num_k);
+    const double prefactor = 2.0*field_constant/volume;
     structure(n, v.data(), 8*num_sigmas, Rv.data());
     auto T = std::vector<cplx>(2*num_k);
     on_basis(Rv.data(), 2, true, T.data());

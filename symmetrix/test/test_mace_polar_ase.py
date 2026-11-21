@@ -9,6 +9,7 @@ import warnings
 import numpy as np
 import pytest
 from ase import Atoms
+from ase.calculators.calculator import PropertyNotImplementedError
 from ase.calculators.mixing import SumCalculator
 from ase.calculators.singlepoint import SinglePointCalculator
 
@@ -87,12 +88,10 @@ def test_results_and_parameters(fake_backend):
         a.calc.set(device="cpu")
 
 
-@pytest.mark.parametrize("kind", ["nonperiodic", "slab", "singular", "nan", "empty"])
+@pytest.mark.parametrize("kind", ["slab", "singular", "nan", "empty"])
 def test_bad_geometry(fake_backend, kind):
     a = water()
-    if kind == "nonperiodic":
-        a.pbc = False
-    elif kind == "slab":
+    if kind == "slab":
         a.pbc = [True, True, False]
     elif kind == "singular":
         a.cell[2] = 0.0
@@ -115,6 +114,16 @@ def test_sum_calculator(fake_backend):
     a.calc = SumCalculator([make(), correction])
     assert a.get_potential_energy() == 15.0
     np.testing.assert_allclose(a.get_forces(), 3.0)
+
+
+def test_open_without_cell(fake_backend):
+    a = water()
+    a.pbc = False
+    a.set_cell(np.zeros((3, 3)))
+    a.calc = make()
+    assert a.get_potential_energy() == 13.0
+    with pytest.raises(PropertyNotImplementedError):
+        a.get_stress()
 
 
 def test_wrong_model_type(tmp_path):
@@ -275,3 +284,52 @@ def test_polar_errors(polar_paths):
     a.calc = make(polar_paths[0], device="cpu")
     with pytest.raises(ValueError, match="r_min"):
         a.get_potential_energy()
+
+
+@pytest.mark.polar_reference
+@pytest.mark.parametrize("device,dtype", [
+    ("cpu", "float64"), ("cuda", "float32"), ("cuda", "float32-mixed"),
+])
+def test_open_reference_and_switch(polar_paths, device, dtype):
+    from mace.calculators import mace_polar
+
+    ref = mace_polar(model=polar_paths[1], device="cpu", default_dtype="float64")
+    ref.set_electrostatic_pbcs("realspace")
+    calc = make(polar_paths[0], device=device, dtype=dtype, charge=1, spin=2)
+    a = water()
+    a.pbc = False
+    a.info.update(charge=1.0, spin=2.0)
+    # Two charged-equivalent fragments, separated beyond the network cutoff.
+    a.positions[:3] -= a.positions[0].copy()
+    a.positions[3:] -= a.positions[3].copy()
+    a.positions[3:, 0] += 10.0
+    a.set_cell([12.42]*3)
+    reference_energies = []
+    for distance_change in (0, 3):
+        a.positions[3:, 0] += distance_change
+        a.calc = ref
+        energy, forces = a.get_potential_energy(), a.get_forces()
+        reference_energies.append(energy)
+        a.calc = calc
+        assert abs(a.get_potential_energy()-energy) / len(a) < (1e-6 if device == "cpu" else 1e-5)
+        assert np.max(np.abs(a.get_forces()-forces)) < (1e-4 if device == "cpu" else 1e-3)
+        assert a.get_potential_energies().sum() == pytest.approx(a.get_potential_energy(), abs=1e-8)
+    assert abs(reference_energies[0] - reference_energies[1]) > 1e-3
+
+    # A boundary change alone must rebuild both neighbor and electrostatic state.
+    a.positions[3:, 0] -= 3.0
+    open_energy = a.get_potential_energy()
+    open_forces = a.get_forces()
+    builds = calc.evaluator.neighbor_list_builds
+    a.pbc = True
+    periodic_energy = a.get_potential_energy()
+    assert calc.evaluator.neighbor_list_builds == builds + 1
+    assert abs(periodic_energy - open_energy) > 1e-3
+    b = a.copy()
+    b.calc = make(polar_paths[0], device=device, dtype=dtype, charge=1, spin=2)
+    assert b.get_potential_energy() == pytest.approx(periodic_energy, abs=1e-5)
+    np.testing.assert_allclose(a.get_forces(), b.get_forces(), rtol=0, atol=1e-4)
+    a.pbc = False
+    assert a.get_potential_energy() == pytest.approx(open_energy, abs=1e-5)
+    assert calc.evaluator.neighbor_list_builds == builds + 2
+    np.testing.assert_allclose(a.get_forces(), open_forces, rtol=0, atol=1e-4)

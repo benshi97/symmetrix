@@ -20,8 +20,8 @@ struct Geometry {
 
     void update(int n, const double* x, const int* numbers, const double* cell, const bool* pbc) {
         if (n <= 0) throw std::invalid_argument("MACEPolar requires at least one atom");
-        if (not (pbc[0] and pbc[1] and pbc[2]))
-            throw std::invalid_argument("MACEPolar currently requires periodic boundaries in all three directions");
+        if (pbc[0] != pbc[1] or pbc[0] != pbc[2])
+            throw std::invalid_argument("MACEPolar requires fully open or fully periodic boundaries");
         for (int k = 0; k < 9; ++k)
             if (not std::isfinite(cell[k])) throw std::invalid_argument("MACEPolar: cell must be finite");
         for (long k = 0; k < 3L*n; ++k)
@@ -29,10 +29,10 @@ struct Geometry {
         const double det = cell[0]*(cell[4]*cell[8]-cell[5]*cell[7])
                          - cell[1]*(cell[3]*cell[8]-cell[5]*cell[6])
                          + cell[2]*(cell[3]*cell[7]-cell[4]*cell[6]);
-        if (not std::isfinite(det) or det == 0)
+        if (pbc[0] and (not std::isfinite(det) or det == 0))
             throw std::invalid_argument("MACEPolar requires a nonsingular periodic cell");
 
-        bool rebuild = n != natoms or skin == 0
+        bool rebuild = n != natoms or skin == 0 or pbc[0] != periodic0
             or not std::equal(numbers, numbers + n, numbers0.begin())
             or not std::equal(cell, cell + 9, cell0.begin());
         for (int i = 0; not rebuild and i < n; ++i) {
@@ -53,7 +53,10 @@ struct Geometry {
                                                 + " is not an element of the model");
                 node_types[i] = int(it - elements.begin());
             }
-            symmetrix_ase::neighbor_list(n, x, cell, pbc, cutoff + skin, nl);
+            // An open molecule's local and long-range edges are independent of its ASE cell.
+            const double no_cell[9]{};
+            symmetrix_ase::neighbor_list(n, x, pbc[0] ? cell : no_cell, pbc, cutoff + skin, nl);
+            periodic0 = pbc[0];
             numbers0.assign(numbers, numbers + n);
             cell0.assign(cell, cell + 9);
             x0.assign(x, x + 3L*n);
@@ -93,6 +96,7 @@ struct Geometry {
     double cutoff, rmin, skin;
     std::vector<int> elements;
     int natoms = -1;
+    bool periodic0 = false;
     int builds = 0;
     std::vector<double> x0, cell0;
     std::vector<int> numbers0;

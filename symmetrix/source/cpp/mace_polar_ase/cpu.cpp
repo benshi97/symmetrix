@@ -1,5 +1,6 @@
 #include "evaluator.hpp"
 #include "mace_polar.hpp"
+#include "realspace.hpp"
 
 #include <numeric>
 #include <span>
@@ -14,6 +15,12 @@ struct CPU : Evaluator {
     double compute(int n, const double* x, const int* numbers, const double* cell, const bool* pbc,
                    double charge, double spin, double* forces, double* virial, double* energies) override {
         geometry.update(n, x, numbers, cell, pbc);
+        realspace::set_hooks(model, !pbc[0], [this, n, x]<realspace::Operation op>(
+                const double* q, const double* adj, double* out, double* f) {
+            #pragma omp parallel for schedule(static)
+            for (int i = 0; i < n; ++i)
+                realspace::evaluate<op>(i, 0, 1, n, x, params.data(), int(params.size())-1, q, adj, out, f);
+        });
         model.compute_node_energies_forces(n, geometry.node_types, geometry.num_neigh,
             geometry.neigh_indices, geometry.neigh_types, geometry.xyz, geometry.r,
             std::span<const double>(x, 3L*n), std::span<const double>(cell, 9), charge, spin);
@@ -32,6 +39,7 @@ struct CPU : Evaluator {
     int neighbor_list_builds() const override { return geometry.builds; }
     MACEPolar model;
     Geometry geometry;
+    std::vector<realspace::Projection> params = realspace::projections(model);
 };
 
 }  // namespace

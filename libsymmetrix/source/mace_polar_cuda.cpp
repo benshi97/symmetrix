@@ -1636,11 +1636,7 @@ void MACEPolarCuda::features_reverse(const float* qq, const Buffer<float2>& stru
                                      const Buffer<float2>& basis_factors, const float* V_adj_, float* q_adj_)
 {
     const int num_sigmas = int(feature_sigmas.size());
-    const float prefactor = float(2*field_constant/volume);
     v.reserve((long)8*num_sigmas*num_nodes);
-    structure_v.reserve(8*num_sigmas*num_k);
-    basis_v.reserve(2*num_k);
-    Z.reserve(2*num_k);
     k_features_reverse<<<blocks(8*num_nodes, 128), 128, 0, stream>>>(num_nodes, num_sigmas, V_adj_,
                                                                      consts + 1 + num_sigmas,
                                                                      consts + 1 + num_sigmas + 4*num_sigmas, v, q_adj_);
@@ -1657,6 +1653,10 @@ void MACEPolarCuda::features_reverse(const float* qq, const Buffer<float2>& stru
         k_add<<<blocks(8L*num_nodes, 128), 128, 0, stream>>>(8L*num_nodes, q_adj_, hook_a, q_adj_);
         return;
     }
+    const float prefactor = float(2*field_constant/volume);
+    structure_v.reserve(8*num_sigmas*num_k);
+    basis_v.reserve(2*num_k);
+    Z.reserve(2*num_k);
     structure(v, 2*num_sigmas, structure_v);
     on_basis(structure_v, 2, true, basis_v);
     k_coulomb<<<blocks(2*num_k, 128), 128, 0, stream>>>(2*num_k, num_k, prefactor, k2inv, basis_v, Z);
