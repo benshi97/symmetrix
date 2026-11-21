@@ -13,7 +13,8 @@ struct CPU : Evaluator {
         : model(file), geometry(model.r_cut, model.radial_spline_r_min, model.atomic_numbers, skin) {}
 
     double compute(int n, const double* x, const int* numbers, const double* cell, const bool* pbc,
-                   double charge, double spin, double* forces, double* virial, double* energies) override {
+                   double charge, double spin, double* forces, double* virial, double* energies,
+                   double* dipole) override {
         geometry.update(n, x, numbers, cell, pbc);
         realspace::set_hooks(model, !pbc[0], [this, n, x]<realspace::Operation op>(
                 const double* q, const double* adj, double* out, double* f) {
@@ -33,6 +34,12 @@ struct CPU : Evaluator {
             }
         std::copy(model.virial.begin(), model.virial.end(), virial);
         if (energies) std::copy_n(model.node_energies.data(), n, energies);
+        if (dipole) {
+            std::fill_n(dipole, 3, 0.0);
+            for (int i = 0; i < n; ++i)
+                for (int k = 0; k < 3; ++k)
+                    dipole[k] += atomic_dipole(model.rho.data(), x, n, i, k);
+        }
         return std::accumulate(model.node_energies.begin(), model.node_energies.begin() + n, 0.0);
     }
 

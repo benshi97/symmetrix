@@ -32,7 +32,7 @@ PYBIND11_MODULE(_mace_polar, m) {
         }), py::arg("model_file"), py::arg("device") = "cuda", py::arg("dtype") = "float32", py::arg("skin") = 1.0)
         .def_property_readonly("neighbor_list_builds", &Evaluator::neighbor_list_builds)
         .def("compute", [](Evaluator& self, Array<double> x, Array<int> numbers, Array<double> cell,
-                           Array<bool> pbc, double charge, double spin, bool energies) {
+                           Array<bool> pbc, double charge, double spin, bool energies, bool dipole) -> py::tuple {
             if (numbers.ndim() != 1 or numbers.size() > std::numeric_limits<int>::max())
                 throw std::invalid_argument("expected numbers[n]");
             const int n = int(numbers.size());
@@ -45,14 +45,19 @@ PYBIND11_MODULE(_mace_polar, m) {
             Array<double> f({n, 3});
             Array<double> w(6);
             Array<double> e(energies ? n : 0);
+            Array<double> mu(dipole ? 3 : 0);
             double energy;
             {
                 py::gil_scoped_release release;
                 std::lock_guard<std::mutex> lock(self.mutex);
                 energy = self.compute(n, x.data(), numbers.data(), cell.data(), pbc.data(), charge, spin,
-                                      f.mutable_data(), w.mutable_data(), energies ? e.mutable_data() : nullptr);
+                                      f.mutable_data(), w.mutable_data(), energies ? e.mutable_data() : nullptr,
+                                      dipole ? mu.mutable_data() : nullptr);
             }
-            return py::make_tuple(energy, f, w, energies ? py::object(e) : py::none());
+            py::object atomic_energies = energies ? py::object(e) : py::none();
+            if (dipole) return py::make_tuple(energy, f, w, atomic_energies, mu);
+            return py::make_tuple(energy, f, w, atomic_energies);
         }, py::arg("x"), py::arg("numbers"), py::arg("cell"), py::arg("pbc"),
-           py::arg("charge") = 0.0, py::arg("spin") = 1.0, py::arg("energies") = false);
+           py::arg("charge") = 0.0, py::arg("spin") = 1.0, py::arg("energies") = false,
+           py::arg("dipole") = false);
 }

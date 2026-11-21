@@ -86,6 +86,7 @@ atoms.calc = MACEPolar(
 )
 energy = atoms.get_potential_energy()  # eV
 forces = atoms.get_forces()           # eV / Angstrom
+dipole = atoms.get_dipole_moment()    # e Angstrom, Cartesian (x, y, z)
 if atoms.pbc.all():
     stress = atoms.get_stress()       # eV / Angstrom**3, ASE Voigt order
 ```
@@ -112,7 +113,12 @@ with `atoms.calc.set(charge=..., spin=...)`; this clears ASE's cached results.
 Construct a new calculator to change model, device, dtype or skin.
 
 The calculator provides total energy, free energy (equal to energy), per-atom
-energies and forces. Fully periodic systems also support potential stress.
+energies, forces and the total dipole. The dipole uses the final charge and
+intrinsic dipole on each atom and is cached alongside the forces. Translating
+a charged system by a vector changes its dipole by its total charge times
+that vector. For periodic systems the returned moment uses the supplied
+atomic images and can change when atoms are wrapped.
+Fully periodic systems also support potential stress.
 ASE adds kinetic stress when requested.
 It can be composed with other ASE calculators through `SumCalculator`.
 

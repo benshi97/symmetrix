@@ -109,7 +109,8 @@ struct Evaluator {
     virtual ~Evaluator() = default;
     std::mutex mutex;
     virtual double compute(int n, const double* x, const int* numbers, const double* cell, const bool* pbc,
-                           double charge, double spin, double* forces, double* virial, double* energies) = 0;
+                           double charge, double spin, double* forces, double* virial, double* energies,
+                           double* dipole) = 0;
     virtual int neighbor_list_builds() const = 0;
 };
 

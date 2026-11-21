@@ -34,12 +34,14 @@ def fake_backend(monkeypatch):
             self.args = args
             self.calls = []
 
-        def compute(self, x, numbers, cell, pbc, charge, spin, energies):
+        def compute(self, x, numbers, cell, pbc, charge, spin, energies, dipole):
+            assert dipole
             self.calls.append((x.copy(), cell.copy(), charge, spin, energies))
             energy = 12.0 + charge + spin
             return (
                 energy, np.full_like(x, 2.0), np.arange(1.0, 7.0),
                 np.full(len(numbers), energy / len(numbers)) if energies else None,
+                np.array([charge, spin, -1.0]),
             )
 
     monkeypatch.setitem(sys.modules, "symmetrix._mace_polar", types.SimpleNamespace(MACEPolar=Fake))
@@ -76,12 +78,14 @@ def test_results_and_parameters(fake_backend):
     assert a.get_potential_energy() == 13.0
     assert a.get_potential_energy(force_consistent=True) == 13.0
     np.testing.assert_array_equal(a.get_forces(), np.full((6, 3), 2.0))
+    np.testing.assert_array_equal(a.get_dipole_moment(), [0.0, 1.0, -1.0])
     np.testing.assert_allclose(a.get_stress(), -np.array([1, 2, 3, 6, 5, 4]) / a.get_volume())
     assert len(a.calc.evaluator.calls) == 1
     assert a.calc.evaluator.calls[-1][2:4] == (0.0, 1.0)
     assert sum(a.get_potential_energies()) == pytest.approx(a.get_potential_energy())
     a.calc.set(charge=1.0, spin=2.0)
     assert a.get_potential_energy() == 15.0
+    np.testing.assert_array_equal(a.get_dipole_moment(), [1.0, 2.0, -1.0])
     assert a.calc.evaluator.calls[-1][2:4] == (1.0, 2.0)
     assert a.calc.get_spin_polarized()
     with pytest.raises(TypeError, match="create a new"):
@@ -157,12 +161,12 @@ def reference_values(a, reference, charge=0.0, spin=1.0):
     a.info.update(charge=charge, spin=spin)
     reference.reset()
     a.calc = reference
-    energy, forces = a.get_potential_energy(), a.get_forces()
+    energy, forces, dipole = a.get_potential_energy(), a.get_forces(), a.get_dipole_moment()
     # In MACE 0.3.16 the analytic PolarMACE stress omits a contribution:
     # for a charged periodic fixture it disagrees with its own energy derivative.
     # Differentiate the original model energy instead of inheriting that error.
     stress = finite_difference_stress(a, reference)
-    return energy, forces, stress
+    return energy, forces, stress, dipole
 
 
 def finite_difference_stress(a, calculator, h=1e-4):
@@ -201,11 +205,12 @@ def test_polar_reference(polar_paths, reference, reference_cache, device, dtype,
     key = triclinic, charge, spin
     if key not in reference_cache:
         reference_cache[key] = reference_values(a, reference, charge, spin)
-    e, f, s = reference_cache[key]
+    e, f, s, mu = reference_cache[key]
     a.calc = make(polar_paths[0], device=device, dtype=dtype, charge=charge, spin=spin)
     assert abs(a.get_potential_energy() - e) / len(a) < 1e-5
     assert np.max(np.abs(a.get_forces() - f)) < 1e-3
     assert np.max(np.abs(a.get_stress() - s)) < 1e-4
+    np.testing.assert_allclose(a.get_dipole_moment(), mu, rtol=0, atol=1e-4)
     assert abs(sum(a.get_potential_energies()) - a.get_potential_energy()) < 1e-9
 
 
@@ -309,12 +314,20 @@ def test_open_reference_and_switch(polar_paths, device, dtype):
         a.positions[3:, 0] += distance_change
         a.calc = ref
         energy, forces = a.get_potential_energy(), a.get_forces()
+        dipole = a.get_dipole_moment()
         reference_energies.append(energy)
         a.calc = calc
         assert abs(a.get_potential_energy()-energy) / len(a) < (1e-6 if device == "cpu" else 1e-5)
         assert np.max(np.abs(a.get_forces()-forces)) < (1e-4 if device == "cpu" else 1e-3)
+        np.testing.assert_allclose(a.get_dipole_moment(), dipole, rtol=0, atol=1e-4)
         assert a.get_potential_energies().sum() == pytest.approx(a.get_potential_energy(), abs=1e-8)
     assert abs(reference_energies[0] - reference_energies[1]) > 1e-3
+
+    translated = a.copy()
+    shift = np.array([-0.3, 2.5, 1.1])
+    translated.translate(shift)
+    translated.calc = calc
+    np.testing.assert_allclose(translated.get_dipole_moment(), dipole + shift, rtol=0, atol=1e-4)
 
     # A boundary change alone must rebuild both neighbor and electrostatic state.
     a.positions[3:, 0] -= 3.0

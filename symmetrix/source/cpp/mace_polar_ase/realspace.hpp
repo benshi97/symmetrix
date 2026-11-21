@@ -1,5 +1,7 @@
 #pragma once
 
+#include "multipoles.hpp"
+
 #include <cmath>
 #include <vector>
 
@@ -60,15 +62,6 @@ std::vector<Projection> projections(const Model& model) {
 #else
 #define POLAR_HD
 #endif
-
-POLAR_HD inline long moment_row(int atom, int lm, int n) {
-#ifdef __CUDA_ARCH__
-    // The CUDA engine stores the scalar block first, then three vectors per atom.
-    return lm == 0 ? atom : n + 3L*atom + (lm-1);
-#else
-    return 4L*atom + lm;
-#endif
-}
 
 template <class T>
 POLAR_HD inline void spread(const T* moments, int atom, int n, int stride, double scalar, double vector,

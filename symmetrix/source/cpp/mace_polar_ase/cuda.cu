@@ -2,6 +2,8 @@
 #include "mace_polar_cuda.hpp"
 #include "realspace.hpp"
 
+#include <cub/block/block_reduce.cuh>
+
 #include <numeric>
 #include <span>
 
@@ -44,12 +46,24 @@ __global__ void realspace_kernel(int n, const double* positions, const realspace
     if (i < n) realspace::evaluate<op>(i, threadIdx.x%32, 32, n, positions, params, widths, q, adj, out, f);
 }
 
+__global__ void molecular_dipole(int n, const double* positions, const float* rho, double* out) {
+    const int axis = blockIdx.x;
+    double sum = 0;
+    for (long i = threadIdx.x; i < n; i += blockDim.x)
+        sum += atomic_dipole(rho, positions, n, int(i), axis);
+    using Reduce = cub::BlockReduce<double, 128>;
+    __shared__ Reduce::TempStorage temp;
+    const double total = Reduce(temp).Sum(sum);
+    if (threadIdx.x == 0) out[axis] = total;
+}
+
 struct CUDA : Evaluator {
     CUDA(const std::string& file, double skin, bool mixed)
         : model(file, mixed), geometry(model.r_cut, model.radial_spline_r_min, model.atomic_numbers, skin) {}
 
     double compute(int n, const double* x, const int* numbers, const double* cell, const bool* pbc,
-                   double charge, double spin, double* forces, double* virial, double* energies) override {
+                   double charge, double spin, double* forces, double* virial, double* energies,
+                   double* dipole) override {
         geometry.update(n, x, numbers, cell, pbc);
         const auto stream = execution.value;
         const size_t edges = geometry.r.size();
@@ -83,6 +97,12 @@ struct CUDA : Evaluator {
                                                            model.node_forces.p, f.p);
             check(cudaGetLastError());
         }
+        if (dipole) {
+            mu.reserve(3);
+            molecular_dipole<<<3, 128, 0, stream>>>(n, positions.p, model.rho.p, mu.p);
+            check(cudaGetLastError());
+            check(cudaMemcpyAsync(dipole, mu.p, 3*sizeof(double), cudaMemcpyDeviceToHost, stream));
+        }
         node_energies.resize(n);
         check(cudaMemcpyAsync(node_energies.data(), model.node_energies.p, n*sizeof(double), cudaMemcpyDeviceToHost, stream));
         check(cudaMemcpyAsync(forces, f.p, 3L*n*sizeof(double), cudaMemcpyDeviceToHost, stream));
@@ -99,7 +119,7 @@ struct CUDA : Evaluator {
     std::vector<realspace::Projection> params = realspace::projections(model);
     MACEPolarCuda::Buffer<realspace::Projection> device_params;
     MACEPolarCuda::Buffer<int> node_types, num_neigh, neigh_indices, neigh_types, centers;
-    MACEPolarCuda::Buffer<double> xyz, r, positions, f;
+    MACEPolarCuda::Buffer<double> xyz, r, positions, f, mu;
     std::vector<double> node_energies;
 };
 

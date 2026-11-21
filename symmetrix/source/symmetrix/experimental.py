@@ -82,7 +82,7 @@ class MACEPolar(Calculator):
     Model, device, dtype and skin are fixed for the calculator instance.
     """
 
-    implemented_properties = ["energy", "free_energy", "energies", "forces", "stress"]
+    implemented_properties = ["energy", "free_energy", "energies", "forces", "stress", "dipole"]
     default_parameters = {"charge": 0.0, "spin": 1.0}
 
     def __init__(
@@ -150,14 +150,16 @@ class MACEPolar(Calculator):
             volume = abs(np.linalg.det(a.cell.array))
             if not np.isfinite(volume) or volume == 0:
                 raise ValueError("MACEPolar requires a nonsingular periodic cell")
-        energy, forces, virial, energies = self.evaluator.compute(
+        energy, forces, virial, energies, dipole = self.evaluator.compute(
             a.positions, a.numbers, a.cell.array, a.pbc,
             self.parameters.charge, self.parameters.spin, "energies" in properties,
+            dipole=True,
         )
         self.results = {
             "energy": float(energy),
             "free_energy": float(energy),
             "forces": np.asarray(forces),
+            "dipole": np.asarray(dipole),
         }
         if periodic:
             # Backend: xx yy zz xy xz yz. ASE: xx yy zz yz xz xy.
