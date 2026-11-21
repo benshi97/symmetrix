@@ -1,4 +1,5 @@
 pybind11_add_module(mace_foundation_bindings MODULE bindings.cpp cpu.cpp)
+target_link_libraries(mace_foundation_bindings PRIVATE symmetrix_ase_neighbors)
 set_target_properties(mace_foundation_bindings PROPERTIES OUTPUT_NAME _mace_foundation)
 target_include_directories(mace_foundation_bindings PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../../libsymmetrix/external/json/single_include ${CMAKE_CURRENT_SOURCE_DIR}/../../../../libsymmetrix/source)
 target_compile_options(mace_foundation_bindings PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-march=native>)

@@ -13,9 +13,9 @@ struct Evaluator {
 std::unique_ptr<Evaluator> mace_foundation_cpu(const std::string& file, const std::string& dtype, double skin);
 std::unique_ptr<Evaluator> mace_foundation_cuda(const std::string& file, const std::string& dtype, double skin);
 
+#include "../common/neighbor_list.hpp"
+
 namespace mace_foundation {
-
-struct NeighborList { std::vector<int> start, j, S; };
-void neighbor_list(int n, const double* x, const double* cell, const bool* pbc, double cutoff, NeighborList& nl);
-
+using symmetrix_ase::NeighborList;
+using symmetrix_ase::neighbor_list;
 }  // namespace mace_foundation

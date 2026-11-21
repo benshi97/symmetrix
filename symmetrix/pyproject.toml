@@ -47,3 +47,6 @@ lint.ignore = ["E741"]
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F403", "E402"]
 "test_*.py" = ["F811"]
+
+[tool.pytest.ini_options]
+markers = ["polar_reference: opt-in fixed-structure PolarMACE evaluations using local checkpoints"]

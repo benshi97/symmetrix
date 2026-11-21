@@ -1,0 +1,6 @@
+add_library(symmetrix_ase_neighbors STATIC neighbor_list.cpp)
+set_target_properties(symmetrix_ase_neighbors PROPERTIES POSITION_INDEPENDENT_CODE ON)
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(symmetrix_ase_neighbors PUBLIC OpenMP::OpenMP_CXX)
+endif()

@@ -68,6 +68,66 @@ from symmetrix import Symmetrix
 See [the source code](source/symmetrix/calculator.py) and [this test](test/test_symmetrix_calc.py)
 for additional details.
 
+### PolarMACE ASE calculator (experimental)
+
+PolarMACE JSON models use their own calculator; `MACEFoundation` does not
+accept them. Use the same Symmetrix version to extract and evaluate the model.
+
+```python
+from symmetrix.experimental import MACEPolar
+
+atoms.calc = MACEPolar(
+    "MACE-POLAR-1-M-C-Cl-F-H-N-O.json",
+    device="cuda",
+    dtype="float32",
+    skin=1.0,  # Angstrom; rebuild after an atom moves more than skin / 2
+    charge=0.0,
+    spin=1.0,
+)
+energy = atoms.get_potential_energy()  # eV
+forces = atoms.get_forces()           # eV / Angstrom
+stress = atoms.get_stress()           # eV / Angstrom**3, ASE Voigt order
+```
+
+All three directions must be periodic and the cell must be nonsingular.
+Orthorhombic and triclinic cells, including changes made by an ASE barostat,
+are supported. Cell changes rebuild the neighbor list and reciprocal-space
+geometry. Electrostatics use the existing model's direct reciprocal-space
+sums; this interface does not use the particle-mesh solver from LAMMPS.
+Nonperiodic systems, slabs, external fields and distributed execution are not
+implemented. The CUDA engine retains its existing supported model shapes.
+
+`dtype=None` selects `float64` on CPU or `float32` on CUDA. CPU supports only
+`float64`; CUDA supports `float32` and `float32-mixed`, matching the existing
+PolarMACE engines. NumPy outputs are float64, which does not change the CUDA
+engine's internal precision. Unsupported device/dtype combinations raise an
+error rather than falling back to a different backend.
+
+`charge` and `spin` are explicit calculator parameters, not read from
+`atoms.info` or initial atomic charges/magnetic moments. They follow the
+existing Symmetrix convention: spin-channel charges are
+`(charge + spin - 1)/2` and `(charge - spin + 1)/2`. Change these parameters
+with `atoms.calc.set(charge=..., spin=...)`; this clears ASE's cached results.
+Construct a new calculator to change model, device, dtype or skin.
+
+The calculator provides total energy, free energy (equal to energy), per-atom
+energies, forces and potential stress. ASE adds kinetic stress when requested.
+It can be composed with other ASE calculators through `SumCalculator`.
+
+Build with GCC as `CMAKE_CXX_COMPILER`, letting Kokkos route its CUDA code
+through `nvcc_wrapper`. Set the CUDA compiler and `CUDAToolkit_ROOT` to the
+same toolkit. GPU support requires `SYMMETRIX_KOKKOS=ON`,
+`Kokkos_ENABLE_CUDA=ON` and a CUDA-enabled build of this Python package.
+
+Reference tests are opt-in and never download models. Set
+`SYMMETRIX_POLAR_MODEL_JSON` and `SYMMETRIX_POLAR_TORCH_MODEL` to local files
+and run `pytest test/test_mace_polar_ase.py -m polar_reference`. These tests
+evaluate fixed structures and finite differences; they do not run dynamics.
+Stress comparisons use finite differences of the original MACE model energy.
+The installed MACE 0.3.16 PolarMACE analytic stress disagrees with its own
+energy derivative for the charged periodic validation structure; the Symmetrix
+virial agrees with that derivative.
+
 ### Foundation-model calculators (experimental)
 
 For the models of `pair_style symmetrix/mace/foundation` (see [pair_symmetrix](../pair_symmetrix/README.md)),
